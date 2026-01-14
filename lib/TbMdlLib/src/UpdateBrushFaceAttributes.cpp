@@ -63,6 +63,41 @@ vm::vec2f toAxis(const UvAxis uvAxis)
   }
 }
 
+template <typename T>
+int findClosestPot(const T x)
+{
+  if (x <= T(0))
+  {
+    return 0;
+  }
+
+  const auto lx = std::log2(x);
+  return static_cast<int>(std::round(lx));
+}
+
+template <typename T>
+T findNextScaleFactor(const T f, const UvPolicy uvPolicy)
+{
+  const auto closestPot = findClosestPot(f);
+  const auto closestPotScale = std::pow(T(2), T(closestPot));
+
+  const auto exactMatch =
+    vm::is_equal(f, closestPotScale, vm::constants<T>::almost_zero());
+
+  const auto closestFactor = std::pow(T(2), T(closestPot));
+
+  switch (uvPolicy)
+  {
+  case UvPolicy::best:
+    return closestFactor;
+  case UvPolicy::next:
+    return exactMatch ? std::pow(T(2), T(closestPot + 1)) : closestFactor;
+  case UvPolicy::prev:
+    return exactMatch ? std::pow(T(2), T(closestPot - 1)) : closestFactor;
+    switchDefault();
+  }
+}
+
 void evaluate(const std::optional<AxisOp>& axisOp, BrushFace& brushFace)
 {
   if (axisOp)
@@ -379,6 +414,45 @@ UpdateBrushFaceAttributes justify(
   case UvAxis::v:
     return {
       .yOffset = SetValue{newValue},
+    };
+    switchDefault();
+  }
+}
+
+UpdateBrushFaceAttributes fit(
+  const BrushFace& brushFace, const UvAxis uvAxis, const UvPolicy uvPolicy)
+{
+  const auto axis = toAxis(uvAxis);
+
+  const auto distances =
+    brushFace.vertices()
+    | std::views::transform(
+      [toUV = brushFace.toUVCoordSystemMatrix(vm::vec2f{0, 0}, vm::vec2f{1, 1})](
+        const auto* vertex) { return vm::vec2f{toUV * vertex->position()}; })
+    | std::views::transform([&](const auto& v) { return vm::dot(v, axis); })
+    | kdl::ranges::to<std::vector>();
+
+  const auto [iMin, iMax] = std::ranges::minmax_element(distances);
+  contract_assert(iMin != iMax);
+
+  const auto faceLength = *iMax - *iMin;
+  const auto textureLength = vm::dot(brushFace.textureSize(), axis);
+
+  const auto currentScale = vm::dot(brushFace.attributes().scale(), axis);
+  const auto currentFactor = currentScale * textureLength / faceLength;
+  const auto nextFactor = findNextScaleFactor(currentFactor, uvPolicy);
+  const auto value = nextFactor * faceLength / textureLength;
+
+
+  switch (uvAxis)
+  {
+  case UvAxis::u:
+    return {
+      .xScale = SetValue{value},
+    };
+  case UvAxis::v:
+    return {
+      .yScale = SetValue{value},
     };
     switchDefault();
   }
