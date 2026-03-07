@@ -308,4 +308,49 @@ void fitUV(Map& map, const UvFitDirection uvFitDirection, const UvPolicy uvPolic
   });
 }
 
+void autoFitUV(Map& map, const UvPolicy uvPolicy)
+{
+  const auto alignToBest = !std::ranges::all_of(
+    map.selection().allBrushFaces(),
+    [](const auto& faceHandle) { return isAligned(faceHandle.face()); });
+
+  const auto alignByPolicy =
+    !alignToBest
+    && std::ranges::all_of(map.selection().allBrushFaces(), [](const auto& faceHandle) {
+         return isJustified(faceHandle.face(), UvAxis::u, UvSign::plus)
+                && isFitted(faceHandle.face(), UvAxis::u)
+                && isJustified(faceHandle.face(), UvAxis::v, UvSign::plus)
+                && isFitted(faceHandle.face(), UvAxis::v);
+       });
+
+  applyAndSwap(
+    map, "Auto Fit Texture", map.selection().allBrushFaces(), [&](auto& brushFace) {
+      if (alignToBest)
+      {
+        evaluate(mdl::align(brushFace, UvPolicy::best), brushFace);
+      }
+      else if (alignByPolicy)
+      {
+        evaluate(mdl::align(brushFace, uvPolicy), brushFace);
+      }
+
+      evaluate(
+        mdl::justify(brushFace, UvAxis::u, UvSign::plus, UvPolicy::best), brushFace);
+      evaluate(
+        mdl::justify(brushFace, UvAxis::v, UvSign::plus, UvPolicy::best), brushFace);
+
+      const auto invariantUVertex = anchorVertex(brushFace, UvAxis::u, UvSign::plus);
+      compensateOffset(brushFace, invariantUVertex, [&] {
+        evaluate(mdl::fit(brushFace, UvAxis::u, UvPolicy::best), brushFace);
+      });
+
+      const auto invariantVVertex = anchorVertex(brushFace, UvAxis::v, UvSign::plus);
+      compensateOffset(brushFace, invariantVVertex, [&] {
+        evaluate(mdl::fit(brushFace, UvAxis::v, UvPolicy::best), brushFace);
+      });
+
+      return true;
+    });
+}
+
 } // namespace tb::mdl
